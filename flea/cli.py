@@ -8,7 +8,13 @@ from flea.config import load_config
 from flea.fees import flea_listing_fee, flea_net_proceeds
 from flea.fetcher import fetch_and_store
 from flea.llm import make_llm_client
-from flea.storage import init_db
+from flea.signals import (
+    Signal,
+    crash_signals,
+    dip_buy_signals,
+    vendor_flip_signals,
+)
+from flea.storage import connect, init_db
 
 
 @click.group()
@@ -134,10 +140,33 @@ def llm_test_cmd() -> None:
     click.echo(answer)
 
 
+def _print_signals(title: str, signals: list[Signal]) -> None:
+    click.echo(f"\n=== {title} ({len(signals)}) ===")
+    if not signals:
+        click.echo("  (none)")
+        return
+    for s in signals:
+        name = (s.short_name or s.item_name)[:28]
+        click.echo(f"  [{s.action:5}] {name:28}  score={s.score:>12,.0f}  {s.reasoning}")
+
+
 @cli.command("scan")
-def scan_cmd() -> None:
-    """Rank current flea opportunities. (not implemented yet)"""
-    click.echo("scan: not implemented yet")
+@click.option(
+    "--type", "signal_type",
+    type=click.Choice(["all", "vendor_flip", "dip_buy", "crash"]),
+    default="all", show_default=True,
+)
+@click.option("--limit", type=int, default=10, show_default=True)
+def scan_cmd(signal_type: str, limit: int) -> None:
+    """Rank current flea opportunities from the most recent snapshot."""
+    cfg = load_config()
+    with connect(cfg.db_path) as conn:
+        if signal_type in ("all", "vendor_flip"):
+            _print_signals("Vendor flips", vendor_flip_signals(conn, limit=limit))
+        if signal_type in ("all", "dip_buy"):
+            _print_signals("Dip buys", dip_buy_signals(conn, cfg, limit=limit))
+        if signal_type in ("all", "crash"):
+            _print_signals("48h crashes", crash_signals(conn, limit=limit))
 
 
 @cli.command("advise")
