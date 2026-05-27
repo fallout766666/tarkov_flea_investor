@@ -131,6 +131,18 @@ def dip_buy_signals(conn: Connection, cfg: Config, limit: int = 20) -> list[Sign
     return out[:limit]
 
 
+def store_signals(conn: Connection, signals: list[Signal], created_at: int) -> int:
+    for s in signals:
+        conn.execute(
+            """
+            INSERT INTO signals (item_id, signal_type, action, score, reasoning, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (s.item_id, s.signal_type, s.action, s.score, s.reasoning, created_at),
+        )
+    return len(signals)
+
+
 def crash_signals(conn: Connection, threshold_pct: float = -25.0, limit: int = 20) -> list[Signal]:
     """Items down sharply in 48h — possible nerf / dump / wipe pressure.
     Surfaced for investigation rather than auto-buy."""
