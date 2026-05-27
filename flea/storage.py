@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS events (
     direction TEXT,
     confidence REAL,
     time_horizon TEXT,
+    summary TEXT,
     created_at INTEGER NOT NULL,
     FOREIGN KEY (article_url) REFERENCES news_articles(url)
 );
@@ -73,7 +74,14 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    cur = conn.execute(f"PRAGMA table_info({table})")
+    return any(row[1] == column for row in cur.fetchall())
+
+
 def init_db(db_path: Path) -> None:
     with connect(db_path) as conn:
         conn.executescript(SCHEMA)
+        if not _column_exists(conn, "events", "summary"):
+            conn.execute("ALTER TABLE events ADD COLUMN summary TEXT")
         conn.commit()
