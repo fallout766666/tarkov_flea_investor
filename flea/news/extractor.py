@@ -67,14 +67,23 @@ statements, datamined upcoming changes.
 Field guidance:
 - affected_items: use in-game item names as written, e.g. "LEDX", "M61",
   "Salewa", "GPU". Prefer the short in-game name over the full name.
-- direction: predicted effect on flea PRICE. A nerf usually means lower
-  price (less demand); a buff usually means higher price; a spawn
-  reduction usually means higher price.
+- direction: predicted effect on the flea LAST LOW PRICE (minimum active
+  listing). A nerf usually means lower price (less demand); a buff usually
+  means higher price; a spawn reduction usually means higher price; a
+  supply increase (more spawns, new craft recipe, trader added) usually
+  means LOWER price.
 - confidence: 0.0-1.0 — your certainty the event is real AND will move
   prices meaningfully.
 - time_horizon: immediate (now), short (days), medium (weeks), long
   (rest of wipe / multi-month).
 - summary: one sentence describing the event neutrally.
+
+Price reference: when you reason about price, use the last low price
+(minimum active listing) as the canonical "real" price, not the 24h
+average. Average prices on the EFT flea include intentionally-inflated
+listings used for real-money-trade gifting and friend transfers, so the
+average can be many multiples of the true clearing price. Last low is
+what the item actually trades at right now.
 """
 
 
