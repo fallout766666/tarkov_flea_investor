@@ -1,11 +1,15 @@
 import time
 from contextlib import contextmanager
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from flea.config import Config, load_config
 from flea.storage import connect
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 def _require_api_key(cfg: Config):
@@ -192,6 +196,13 @@ def create_app(cfg: Config) -> FastAPI:
             "window": window,
             "snapshots": [_row_to_dict(r) for r in rows],
         }
+
+    if STATIC_DIR.is_dir():
+        @app.get("/", include_in_schema=False)
+        def index():
+            return FileResponse(STATIC_DIR / "index.html")
+
+        app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     return app
 
