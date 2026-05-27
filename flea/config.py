@@ -23,8 +23,13 @@ class Config:
     fusion_model: str
     news_sources: dict[str, bool] = field(default_factory=dict)
 
+    server_host: str = "127.0.0.1"
+    server_port: int = 8765
+    server_allowed_ips: list[str] = field(default_factory=list)
+
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
+    flea_api_key: str | None = None
     tarkov_dev_api_url: str = "https://api.tarkov.dev/graphql"
 
 
@@ -54,8 +59,12 @@ def load_config(config_path: Path | None = None) -> Config:
         extraction_model=raw["llm"]["extraction_model"],
         fusion_model=raw["llm"]["fusion_model"],
         news_sources=raw.get("news", {}).get("sources", {}),
+        server_host=raw.get("server", {}).get("host", "127.0.0.1"),
+        server_port=raw.get("server", {}).get("port", 8765),
+        server_allowed_ips=raw.get("server", {}).get("allowed_ips", []),
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
+        flea_api_key=os.getenv("FLEA_API_KEY"),
         tarkov_dev_api_url=os.getenv(
             "TARKOV_DEV_API_URL", "https://api.tarkov.dev/graphql"
         ),
