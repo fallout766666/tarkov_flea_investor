@@ -1,0 +1,39 @@
+# Copy to config.toml and edit. config.toml is gitignored.
+
+[paths]
+db = "data/flea.db"
+log = "logs/flea.log"
+
+[poll]
+price_interval_seconds = 300
+news_interval_seconds = 1800
+
+[flea]
+# In-game character upgrades that affect flea fees.
+# Intel Center level 3 grants -30% fee. Hideout Management skill adds
+# -0.3% per level on top (capped at level 50 → -15%), max -45% combined.
+intel_center_level = 0
+hideout_management_skill = 0
+
+[watchlist]
+# Items the agent tracks deeply. Use tarkov.dev item names or IDs.
+items = []
+
+[signals]
+dip_threshold_pct = 15
+sell_threshold_pct = 20
+trend_window_days = 7
+
+[llm]
+provider = "openai"
+# Extraction: cheap model for news → structured JSON. Try gpt-5.4-mini if nano
+# misclassifies on dense patch notes.
+extraction_model = "gpt-5.4-nano"
+# Fusion: reasoning model for signal aggregation and final advice. Bump to
+# gpt-5.5 or gpt-5.5-pro for higher-stakes decisions.
+fusion_model = "gpt-5.4"
+
+[news.sources]
+bsg_official = true
+reddit = true
+patch_notes = true
