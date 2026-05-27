@@ -39,8 +39,8 @@ reddit = true
 patch_notes = true
 
 [server]
-# Read-only HTTP API. Bind to 127.0.0.1 for local-only access (Windows dev),
-# or to a specific LAN IP (e.g. "192.168.1.50") on the Mac. Avoid "0.0.0.0".
+# Read-only HTTP API. Bind to 127.0.0.1 for local-only access,
+# or to a specific LAN IP (e.g. "192.168.1.50").
 host = "127.0.0.1"
 port = 8765
 # IPs allowed to call the API. Empty list = no IP restriction (still need
