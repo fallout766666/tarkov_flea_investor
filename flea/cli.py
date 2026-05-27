@@ -1,4 +1,5 @@
 import json
+import time
 
 import click
 
@@ -8,6 +9,9 @@ from flea.config import load_config
 from flea.fees import flea_listing_fee, flea_net_proceeds
 from flea.fetcher import fetch_and_store
 from flea.llm import make_llm_client
+from flea.news.events import article_exists, store_article, store_event
+from flea.news.extractor import Extractor
+from flea.news.sources import RedditSource
 from flea.signals import (
     Signal,
     crash_signals,
@@ -178,8 +182,140 @@ def advise_cmd(item: str) -> None:
 
 @cli.command("watch")
 def watch_cmd() -> None:
-    """Run the polling daemon. (not implemented yet)"""
-    click.echo("watch: not implemented yet")
+    """Run the polling daemon: price loop + news loop on configured intervals."""
+    from flea.daemon import run
+
+    cfg = load_config()
+    run(cfg)
+
+
+@cli.group("news")
+def news_grp() -> None:
+    """News ingestion and event extraction."""
+
+
+def _build_sources(cfg) -> list:
+    sources = []
+    enabled = cfg.news_sources or {}
+    if enabled.get("reddit", True):
+        sources.append(RedditSource())
+    return sources
+
+
+@news_grp.command("fetch")
+@click.option("--limit", type=int, default=None,
+              help="Override per-source post limit.")
+@click.option("--dry-run", is_flag=True,
+              help="Fetch and extract, but don't write to the database.")
+def news_fetch_cmd(limit: int | None, dry_run: bool) -> None:
+    """Pull fresh articles, extract events, and store them."""
+    cfg = load_config()
+    init_db(cfg.db_path)
+    llm = make_llm_client(cfg)
+    extractor = Extractor(llm)
+    sources = _build_sources(cfg)
+    if not sources:
+        click.echo("No news sources enabled.")
+        return
+
+    now = int(time.time())
+    new_articles = 0
+    skipped = 0
+    total_events = 0
+
+    with connect(cfg.db_path) as conn:
+        for src in sources:
+            if limit is not None and hasattr(src, "limit"):
+                src.limit = limit
+            click.echo(f"Fetching from {src.name}...")
+            try:
+                articles = src.fetch()
+            except Exception as e:
+                click.echo(f"  error: {e}")
+                continue
+            click.echo(f"  {len(articles)} candidate articles")
+
+            for art in articles:
+                if article_exists(conn, art.url):
+                    skipped += 1
+                    continue
+
+                try:
+                    events = extractor.extract(art)
+                except Exception as e:
+                    click.echo(f"  extraction failed for {art.url}: {e}")
+                    continue
+
+                if dry_run:
+                    if events:
+                        click.echo(f"  [dry] {art.title[:60]}: {len(events)} event(s)")
+                    new_articles += 1
+                    total_events += len(events)
+                    continue
+
+                store_article(conn, art, fetched_at=now)
+                new_articles += 1
+                for ev in events:
+                    store_event(conn, art.url, ev, created_at=now)
+                    total_events += 1
+                if events:
+                    click.echo(f"  + {art.title[:60]}: {len(events)} event(s)")
+            if not dry_run:
+                conn.commit()
+
+    click.echo(
+        f"Done. new articles: {new_articles}, "
+        f"already-seen: {skipped}, events: {total_events}"
+        + (" (dry-run, nothing persisted)" if dry_run else "")
+    )
+
+
+@news_grp.command("list")
+@click.option("--limit", type=int, default=20, show_default=True)
+@click.option("--min-confidence", type=float, default=0.0, show_default=True)
+def news_list_cmd(limit: int, min_confidence: float) -> None:
+    """Show recent extracted events."""
+    cfg = load_config()
+    with connect(cfg.db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT e.id, e.event_type, e.direction, e.confidence,
+                   e.time_horizon, e.summary, e.created_at,
+                   a.title AS article_title, a.source AS article_source
+            FROM events e
+            LEFT JOIN news_articles a ON a.url = e.article_url
+            WHERE e.confidence >= ?
+            ORDER BY e.created_at DESC, e.id DESC
+            LIMIT ?
+            """,
+            (min_confidence, limit),
+        ).fetchall()
+
+        if not rows:
+            click.echo("(no events)")
+            return
+
+        for row in rows:
+            items = conn.execute(
+                """
+                SELECT i.short_name, i.name
+                FROM event_items ei
+                JOIN items i ON i.id = ei.item_id
+                WHERE ei.event_id = ?
+                """,
+                (row["id"],),
+            ).fetchall()
+            item_str = ", ".join(it["short_name"] or it["name"] for it in items) or "-"
+            click.echo(
+                f"[{row['event_type']:12}] dir={row['direction']:7} "
+                f"conf={row['confidence']:.2f} horizon={row['time_horizon']:9} "
+                f"items={item_str}"
+            )
+            click.echo(f"    {row['summary']}")
+            if row["article_title"]:
+                click.echo(
+                    f"    src={row['article_source']} | {row['article_title'][:80]}"
+                )
 
 
 if __name__ == "__main__":
