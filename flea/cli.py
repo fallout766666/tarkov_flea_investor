@@ -35,6 +35,42 @@ def init_cmd() -> None:
     click.echo(f"Initialized database at {cfg.db_path}")
 
 
+@cli.group("db")
+def db_grp() -> None:
+    """Database maintenance."""
+
+
+@db_grp.command("reset")
+@click.option("--yes", is_flag=True,
+              help="Skip the first confirmation. The typed-path confirmation is still required.")
+def db_reset_cmd(yes: bool) -> None:
+    """Delete all collected data. Two confirmations required."""
+    cfg = load_config()
+    if not cfg.db_path.exists():
+        click.echo(f"No database at {cfg.db_path}; nothing to delete.")
+        return
+
+    size_kb = cfg.db_path.stat().st_size // 1024
+    click.echo(f"This will permanently delete {cfg.db_path} ({size_kb} KB).")
+    click.echo("All price history, news articles, events, and signals will be lost.")
+
+    if not yes:
+        click.confirm("Continue?", abort=True)
+
+    typed = click.prompt(f"Type the database path exactly to confirm ({cfg.db_path})", default="", show_default=False)
+    if typed.strip() != str(cfg.db_path):
+        click.echo("Path mismatch — aborting.")
+        raise click.Abort()
+
+    # Remove any -wal / -shm files that SQLite may have left around.
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        p = cfg.db_path.with_name(cfg.db_path.name + suffix) if suffix else cfg.db_path
+        if p.exists():
+            p.unlink()
+            click.echo(f"deleted {p}")
+    click.echo("Done. Run `flea init` to recreate the schema.")
+
+
 @cli.command("ping")
 def ping_cmd() -> None:
     """Check connectivity to tarkov.dev."""
