@@ -189,6 +189,21 @@ def watch_cmd() -> None:
     run(cfg)
 
 
+@cli.command("serve")
+@click.option("--host", default=None, help="Override config server.host.")
+@click.option("--port", type=int, default=None, help="Override config server.port.")
+def serve_cmd(host: str | None, port: int | None) -> None:
+    """Run the read-only HTTP API for the web UI / external clients."""
+    from flea.server import run as run_server
+
+    cfg = load_config()
+    if host is not None:
+        cfg.server_host = host
+    if port is not None:
+        cfg.server_port = port
+    run_server(cfg)
+
+
 @cli.group("news")
 def news_grp() -> None:
     """News ingestion and event extraction."""
