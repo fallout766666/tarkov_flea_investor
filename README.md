@@ -2,7 +2,8 @@
 
 Decision-support agent for the Escape from Tarkov flea market. Pulls live
 prices from [tarkov.dev](https://tarkov.dev), ingests game news from Reddit
-(and later BSG sources), and surfaces buy/sell/watch signals.
+(and later BSG sources), and surfaces buy/sell/watch signals through a CLI
+and a small web dashboard.
 
 This tool **does not interact with the game**. It does not read game memory,
 inject input, or automate any action — it only gives you information so you
@@ -10,7 +11,8 @@ can act in-game yourself. Compliant with EFT EULA and BattlEye.
 
 ## Features
 
-- 5044+ items snapshotted from tarkov.dev every 5 min, building a local price history.
+- 5044+ items snapshotted from tarkov.dev on a schedule, building a local
+  price history (the API itself doesn't expose history — we record it).
 - Rule-based signals: **vendor flips** (flea → trader, no fees), **dip buys**
   (with proper flea-fee math), **48h crashes** (down ≥25%).
 - News ingestion from r/EscapefromTarkov with LLM event extraction
@@ -18,8 +20,10 @@ can act in-game yourself. Compliant with EFT EULA and BattlEye.
 - Tiered LLM strategy: cheap nano model for extraction, bigger model for
   reasoning. Defaults eligible for OpenAI's free daily token pool when
   prompt sharing is on.
-- Single SQLite database; CLI commands and the background daemon read/write
-  the same file safely.
+- Two independent processes: a **daemon** that polls and writes, and a
+  read-only **HTTP server** with a single-page dashboard for the same data.
+- Single SQLite database. CLI tools, daemon, and server all share it
+  safely (one writer, many readers).
 
 ## Setup
 
@@ -36,18 +40,25 @@ pip install -r requirements.txt
 
 ### Configuration
 
-1. **API key.** Copy `.env.example` to `.env` and fill in `OPENAI_API_KEY`.
-
-   To use OpenAI's free daily tokens, enable prompt sharing at
-   <https://platform.openai.com/settings/organization/data-controls>.
-   Eligible models include `gpt-5.4-nano` (2.5M tokens/day) and
-   `gpt-5.4` (250k tokens/day).
+1. **Secrets.** Copy `.env.example` to `.env` and fill in:
+   - `OPENAI_API_KEY` — required for news extraction and reasoning.
+     To use OpenAI's free daily tokens, enable prompt sharing at
+     <https://platform.openai.com/settings/organization/data-controls>.
+     Eligible models include `gpt-5.4-nano` (2.5M tokens/day) and
+     `gpt-5.4` (250k tokens/day).
+   - `FLEA_API_KEY` — required to run the web server. Generate a strong
+     value, e.g.
+     `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
 
 2. **Config file.** Copy `config.example.toml` to `config.toml` and adjust:
    - `[flea] intel_center_level` / `hideout_management_skill` — your in-game
      state. Affects the fee calculator and `dip_buy` net-proceeds math.
    - `[poll]` intervals — defaults: 300s price, 1800s news.
    - `[llm]` models — change extraction/fusion models if needed.
+   - `[server] host` / `port` / `allowed_ips` — bind address for the web
+     server. Keep `127.0.0.1` for local dev; use a specific LAN IP on a
+     deployment machine (avoid `0.0.0.0`). Populate `allowed_ips` to
+     restrict which clients can hit the API even with the key.
 
 3. **Initialize the DB.**
 
@@ -71,40 +82,63 @@ All commands are invoked via `python -m flea <command>`.
 | `news fetch [--limit N] [--dry-run]` | Pull articles, extract events via LLM, persist. |
 | `news list [--limit N] [--min-confidence X]` | Show recent extracted events. |
 | `llm-test` | Smoke-test both LLM models on a fake patch note. |
+| `db reset [--yes]` | Delete the database. Requires y/N confirm **and** typing the exact DB path. |
 
-### Background daemon
+### Long-running processes
+
+These two are designed to run side-by-side in their own terminals (or as
+auto-started services on a deployment machine).
 
 ```bash
-python -m flea watch
+python -m flea watch    # data collector (writes)
+python -m flea serve    # web API + dashboard (reads)
 ```
 
-Runs two loops in parallel:
+**`flea watch`** — the daemon. Runs two loops in parallel:
 
 - **Price loop** (every `price_interval_seconds`): fetches the catalog,
   writes a snapshot row per item, runs all three rule signals, and persists
   them to the `signals` table.
 - **News loop** (every `news_interval_seconds`): pulls Reddit, extracts
-  events via the nano model, persists articles and events.
+  events via the nano model on new articles only (deduped by URL so re-runs
+  cost nothing), persists articles and events.
 
 Logs go to `logs/flea.log` (rotated at 2 MB × 3 files) and to stdout. Stop
-the daemon with `Ctrl-C` (graceful shutdown — current cycles finish, then
-threads exit).
+with `Ctrl-C` (graceful — current cycles finish first).
 
-CLI commands can be run from a separate terminal while the daemon is
-running. SQLite handles concurrent readers and the single writer.
+**`flea serve`** — the HTTP server. Read-only access to the database.
+
+- Dashboard at `http://<host>:<port>/` — three tabs: signals, events, item
+  price history with charts. Paste your `FLEA_API_KEY` once, it persists in
+  the browser.
+- JSON endpoints (all require `X-API-Key` header except `/health`):
+  - `GET /health` — daemon liveness via last-snapshot timestamps.
+  - `GET /signals?type=&limit=` — latest signal emit, filterable by type.
+  - `GET /events?min_confidence=&limit=` — recent events.
+  - `GET /items?q=&limit=` — name/short-name search.
+  - `GET /items/{id}/history?window=24h|7d|30d` — price snapshots over a window.
+- Refuses to start if `FLEA_API_KEY` is unset, to prevent accidental
+  open access.
+- `--host` / `--port` flags override config for ad-hoc runs (e.g. exposing
+  a local instance to your LAN without editing `config.toml`).
+
+The daemon and the server are deliberately separate processes — you can
+restart the web layer for code/config changes without interrupting an
+in-flight news fetch.
 
 ## Architecture
 
 ```
-┌─ daemon process ──────────────────┐
-│  price thread → fetch + signals   │
-│  news thread  → reddit + LLM      │
-│  (web thread, future)             │
-└──────────────┬────────────────────┘
-               │  SQLite (data/flea.db)
-               │
-       CLI processes (separate, on-demand)
-       └─ scan / news list / fee / advise
+┌─ flea watch (daemon) ────────┐    ┌─ flea serve (HTTP) ──────────┐
+│  price thread → fetch + sigs │    │  uvicorn + FastAPI           │
+│  news thread  → reddit + LLM │    │  /  (static dashboard)       │
+└──────────────┬───────────────┘    │  /signals /events /items ... │
+               │                    └──────────────┬───────────────┘
+               │                                   │
+               └──────── SQLite (data/flea.db) ────┘
+                              ▲
+                              │
+            CLI processes (scan, news list, fee, ...)
 ```
 
 Tiers of analysis:
@@ -125,6 +159,18 @@ Tables in `data/flea.db`:
 - `news_articles` — deduped by URL.
 - `events`, `event_items` — structured events extracted from articles.
 - `signals` — append-only feed of every signal the daemon emits.
+
+Wipe everything with `flea db reset` (double-confirmation required) and run
+`flea init` again.
+
+## A note on prices
+
+`last_low_price` (minimum active listing) is the canonical price the agent
+reasons about. The 24h average is shown as secondary context but should
+**not** be trusted — it's polluted by intentionally-inflated listings used
+for real-money-trade gifting and friend transfers (EFT has no direct trade,
+so players post absurd listings the recipient buys). Last-low is what items
+actually clear at.
 
 ## License
 
