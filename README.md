@@ -18,8 +18,7 @@ can act in-game yourself. Compliant with EFT EULA and BattlEye.
 - News ingestion from r/EscapefromTarkov with LLM event extraction
   (nerfs, buffs, wipes, spawn changes, in-game events).
 - Tiered LLM strategy: cheap nano model for extraction, bigger model for
-  reasoning. Defaults eligible for OpenAI's free daily token pool when
-  prompt sharing is on.
+  reasoning.
 - Two independent processes: a **daemon** that polls and writes, and a
   read-only **HTTP server** with a single-page dashboard for the same data.
 - Single SQLite database. CLI tools, daemon, and server all share it
@@ -42,10 +41,6 @@ pip install -r requirements.txt
 
 1. **Secrets.** Copy `.env.example` to `.env` and fill in:
    - `OPENAI_API_KEY` — required for news extraction and reasoning.
-     To use OpenAI's free daily tokens, enable prompt sharing at
-     <https://platform.openai.com/settings/organization/data-controls>.
-     Eligible models include `gpt-5.4-nano` (2.5M tokens/day) and
-     `gpt-5.4` (250k tokens/day).
    - `FLEA_API_KEY` — required to run the web server. Generate a strong
      value, e.g.
      `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
